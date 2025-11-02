@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Facial Emotion Detection</title>
+</head>
+<body>
+    <h2>Facial Emotion Detection Form</h2>
+
+    <form action="/predict" method="POST" enctype="multipart/form-data">
+        <label>Name:</label><br>
+        <input type="text" name="name" required><br><br>
+
+        <label>Matric No:</label><br>
+        <input type="text" name="matric_no" required><br><br>
+
+        <label>Department:</label><br>
+        <input type="text" name="department" required><br><br>
+
+        <label>Upload Photo:</label><br>
+        <input type="file" name="image" accept="image/*" required><br><br>
+
+        <button type="submit">Submit</button>
+    </form>
+
+    {% if message %}
+        <h3>{{ message }}</h3>
+        {% if image_path %}
+            <img src="{{ image_path }}" alt="Uploaded Image" width="150">
+        {% endif %}
+    {% endif %}
+</body>
+</html>
