@@ -4,69 +4,23 @@ import sqlite3
 from flask import Flask, render_template, request
 from werkzeug.utils import secure_filename
 from PIL import Image
-import torch
-import torch.nn as nn
-from torchvision import transforms
+import cv2
+from fer import FER
 
 # ===============================
 # 1. Flask setup
 # ===============================
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
-
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # ===============================
-# 2. Load the trained PyTorch model
+# 2. Initialize emotion detector
 # ===============================
-class EmotionCNN(nn.Module):
-    def __init__(self, num_classes=7):
-        super(EmotionCNN, self).__init__()
-        self.conv_layers = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-        )
-        self.fc_layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(128 * 6 * 6, 128),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(128, num_classes)
-        )
-
-    def forward(self, x):
-        x = self.conv_layers(x)
-        x = self.fc_layers(x)
-        return x
-
-# Load model weights
-model = EmotionCNN(num_classes=7)
-model.load_state_dict(torch.load("face_emotionModel.pth", map_location='cpu'))
-model.eval()
-
-# Emotion labels (same order as training dataset folders)
-EMOTIONS = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+detector = FER(mtcnn=True)  # Uses MTCNN for better face detection
 
 # ===============================
-# 3. Define image transformation
-# ===============================
-transform = transforms.Compose([
-    transforms.Grayscale(num_output_channels=1),
-    transforms.Resize((48, 48)),
-    transforms.ToTensor()
-])
-
-# ===============================
-# 4. Initialize SQLite database
+# 3. Initialize SQLite database
 # ===============================
 def init_db():
     conn = sqlite3.connect('database.db')
@@ -85,9 +39,8 @@ def init_db():
 init_db()
 
 # ===============================
-# 5. Flask Routes
+# 4. Flask Routes
 # ===============================
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -104,17 +57,20 @@ def predict():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         image_file.save(filepath)
 
-        # Load and preprocess image
-        img = Image.open(filepath)
-        img_tensor = transform(img).unsqueeze(0)
+        # Read image with OpenCV
+        img = cv2.imread(filepath)
 
-        # Predict emotion
-        with torch.no_grad():
-            outputs = model(img_tensor)
-            _, predicted = torch.max(outputs, 1)
-            emotion = EMOTIONS[predicted.item()]
+        # Detect emotions
+        results = detector.detect_emotions(img)
 
-        # Save user info to database
+        if results:
+            # Get the most prominent emotion
+            top_emotion, score = detector.top_emotion(img)
+            emotion = top_emotion
+        else:
+            emotion = "no face detected"
+
+        # Save to database
         conn = sqlite3.connect('database.db')
         c = conn.cursor()
         c.execute("INSERT INTO users (name, matric_no, department, emotion, image_path) VALUES (?, ?, ?, ?, ?)",
@@ -122,14 +78,14 @@ def predict():
         conn.commit()
         conn.close()
 
-        message = f"You look {emotion}! 😊"
+        message = f"You look {emotion}!" if emotion != "no face detected" else "Couldn't detect a face. Try again?"
         return render_template('index.html', message=message, image_path=filepath)
 
     else:
         return render_template('index.html', message="Please upload an image.")
 
 # ===============================
-# 6. Run the app
+# 5. Run the app
 # ===============================
 if __name__ == '__main__':
     app.run(debug=True)
